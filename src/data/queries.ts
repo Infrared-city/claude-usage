@@ -75,7 +75,7 @@ export function queryKpis(db: Database, filters: Filters): KpiData {
   `, params)!
 
   const dateRangeDays = dateRange?.min_date && dateRange?.max_date
-    ? Math.max(1, Math.ceil((new Date(dateRange.max_date).getTime() - new Date(dateRange.min_date).getTime()) / 86400000))
+    ? Math.max(1, Math.round((new Date(dateRange.max_date).getTime() - new Date(dateRange.min_date).getTime()) / 86400000) + 1)
     : 1
 
   const cacheHitRate = cacheRow.total_input > 0 ? cacheRow.total_cache_read / cacheRow.total_input : 0
@@ -307,7 +307,7 @@ export function queryTotalHours(db: Database, filters: Filters): { active: numbe
   const row = queryOne<{ total: number; days: number }>(db, `
     SELECT COALESCE(SUM(active_duration_s), 0) as total,
       COUNT(DISTINCT start_date) as days
-    FROM sessions ${appendCondition(clause, 'is_subagent = 0')}
+    FROM sessions ${clause}
   `, params)
   return {
     active: (row?.total ?? 0) / 3600,

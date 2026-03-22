@@ -35,7 +35,7 @@ export function FolderHelp() {
   const platforms = showAll ? (['mac', 'windows', 'linux'] as OS[]) : [detected]
 
   function copyPath(path: string) {
-    navigator.clipboard.writeText(path.replace('~', '$HOME'))
+    navigator.clipboard.writeText(path)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
