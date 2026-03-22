@@ -7,7 +7,6 @@ interface FilterState extends Filters {
   setProject: (project: string | null) => void
   setModel: (model: string | null) => void
   setMinCost: (minCost: number) => void
-  setExcludeSubagents: (exclude: boolean) => void
   setLastNDays: (n: number) => void
   resetFilters: () => void
 }
@@ -18,7 +17,6 @@ const defaultFilters: Filters = {
   project: null,
   model: null,
   minCost: 0,
-  excludeSubagents: true,
 }
 
 function daysAgo(n: number): string {
@@ -33,7 +31,6 @@ export const useFilterStore = create<FilterState>((set) => ({
   setProject: (project) => set({ project }),
   setModel: (model) => set({ model }),
   setMinCost: (minCost) => set({ minCost }),
-  setExcludeSubagents: (excludeSubagents) => set({ excludeSubagents }),
   setLastNDays: (n) => set({ dateFrom: daysAgo(n), dateTo: null }),
   resetFilters: () => set(defaultFilters),
 }))
@@ -46,7 +43,6 @@ export function useFilters(): Filters {
       project: s.project,
       model: s.model,
       minCost: s.minCost,
-      excludeSubagents: s.excludeSubagents,
-    }))
+}))
   )
 }

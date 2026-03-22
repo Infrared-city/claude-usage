@@ -65,9 +65,9 @@ function OverviewPage() {
       <KpiGrid>
         <KpiCard label="Total Cost" value={formatCost(kpis.total_cost)} subtext={`${kpis.date_range_days} days`} />
         <KpiCard label="Monthly Est." value={formatCost(kpis.monthly_est)} subtext="projected" />
-        <KpiCard label="Sessions" value={formatNumber(kpis.session_count)} subtext={`${formatCost(kpis.daily_avg_cost)}/day`} />
+        <KpiCard label="Sessions" value={formatNumber(kpis.session_count)} subtext={`+ ${formatNumber(kpis.subagent_count)} subagents`} />
         <KpiCard label="Hours Coded" value={`${totalHours.active.toFixed(0)}h`} subtext={`${(totalHours.active / Math.max(1, totalHours.activeDays)).toFixed(1)}h/day · ${totalHours.activeDays} active days`} />
-        <KpiCard label="Avg Session" value={formatCost(kpis.avg_session_cost)} subtext={`${formatDuration(kpis.avg_duration)}${filters.excludeSubagents ? ' · excl. sub' : ''}`} />
+        <KpiCard label="Avg Session" value={formatCost(kpis.avg_session_cost)} subtext={formatDuration(kpis.avg_duration)} />
         <KpiCard label="Cache Hit Rate" value={formatPercent(kpis.cache_hit_rate)} />
       </KpiGrid>
 

@@ -8,7 +8,7 @@ import { Filter, X } from 'lucide-react'
 
 export function FilterBar() {
   const filters = useFilters()
-  const { setDateRange, setProject, setModel, setExcludeSubagents, setLastNDays, resetFilters } = useFilterStore.getState()
+  const { setDateRange, setProject, setModel, setLastNDays, resetFilters } = useFilterStore.getState()
 
   const { data: db } = useQuery({ queryKey: ['db'], queryFn: initDb, staleTime: Infinity })
   const { data: projects } = useQuery({
@@ -27,7 +27,7 @@ export function FilterBar() {
     enabled: !!db,
   })
 
-  const hasFilters = filters.dateFrom || filters.dateTo || filters.project || filters.model || filters.minCost > 0 || filters.excludeSubagents
+  const hasFilters = filters.dateFrom || filters.dateTo || filters.project || filters.model || filters.minCost > 0
 
   return (
     <div className="border-b border-border bg-bg-card/50 px-6 py-3">
@@ -77,16 +77,6 @@ export function FilterBar() {
             <option key={m} value={m}>{m}</option>
           ))}
         </select>
-
-        <label className="flex items-center gap-1.5 text-xs text-text-secondary cursor-pointer">
-          <input
-            type="checkbox"
-            checked={filters.excludeSubagents}
-            onChange={(e) => setExcludeSubagents(e.target.checked)}
-            className="rounded border-border"
-          />
-          No subagents
-        </label>
 
         {hasFilters && (
           <Button variant="ghost" size="sm" onClick={resetFilters}>

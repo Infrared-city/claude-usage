@@ -93,6 +93,7 @@ export interface TokenEconomics {
 export interface KpiData {
   total_cost: number
   session_count: number
+  subagent_count: number
   total_api_calls: number
   avg_session_cost: number
   total_tokens: number
@@ -111,7 +112,6 @@ export interface Filters {
   project: string | null
   model: string | null
   minCost: number
-  excludeSubagents: boolean
 }
 
 export interface DailyModelCost {

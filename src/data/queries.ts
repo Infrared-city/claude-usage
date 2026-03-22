@@ -30,9 +30,6 @@ function buildWhere(filters: Filters): { clause: string; params: Record<string, 
     conditions.push('cost >= $minCost')
     params.$minCost = filters.minCost
   }
-  if (filters.excludeSubagents) {
-    conditions.push('is_subagent = 0')
-  }
 
   const clause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''
   return { clause, params }
@@ -49,17 +46,29 @@ export function querySessions(db: Database, filters: Filters): SessionRow[] {
 
 export function queryKpis(db: Database, filters: Filters): KpiData {
   const { clause, params } = buildWhere(filters)
-  const row = queryOne<Record<string, number>>(db, `
+
+  // Totals from ALL sessions (including subagents) — real spend
+  const totals = queryOne<Record<string, number>>(db, `
     SELECT
       COALESCE(SUM(cost), 0) as total_cost,
-      COUNT(*) as session_count,
       COALESCE(SUM(api_calls), 0) as total_api_calls,
-      COALESCE(AVG(CASE WHEN cost > 0.001 THEN cost END), 0) as avg_session_cost,
       COALESCE(SUM(input_tokens + output_tokens + cache_5m_tokens + cache_1h_tokens + cache_read_tokens), 0) as total_tokens,
       COALESCE(SUM(error_count), 0) as total_errors,
-      COALESCE(AVG(duration_s), 0) as avg_duration,
       COALESCE(SUM(tool_calls), 0) as total_tool_calls
     FROM sessions ${clause}
+  `, params)!
+
+  // Counts and averages from parent sessions only (subagents distort these)
+  const parentClause = appendCondition(clause, 'is_subagent = 0')
+  const parents = queryOne<Record<string, number>>(db, `
+    SELECT
+      COUNT(*) as session_count,
+      COALESCE(AVG(active_duration_s), 0) as avg_duration
+    FROM sessions ${parentClause}
+  `, params)!
+
+  const subagentRow = queryOne<{ count: number }>(db, `
+    SELECT COUNT(*) as count FROM sessions ${appendCondition(clause, 'is_subagent = 1')}
   `, params)!
 
   const dateRange = queryOne<{ min_date: string; max_date: string }>(db, `
@@ -79,20 +88,22 @@ export function queryKpis(db: Database, filters: Filters): KpiData {
     : 1
 
   const cacheHitRate = cacheRow.total_input > 0 ? cacheRow.total_cache_read / cacheRow.total_input : 0
+  const sessionCount = parents.session_count || 1
 
   return {
-    total_cost: row.total_cost,
-    session_count: row.session_count,
-    total_api_calls: row.total_api_calls,
-    avg_session_cost: row.avg_session_cost,
-    total_tokens: row.total_tokens,
+    total_cost: totals.total_cost,
+    session_count: parents.session_count,
+    subagent_count: subagentRow.count,
+    total_api_calls: totals.total_api_calls,
+    avg_session_cost: totals.total_cost / sessionCount,
+    total_tokens: totals.total_tokens,
     cache_hit_rate: cacheHitRate,
-    daily_avg_cost: row.total_cost / dateRangeDays,
-    monthly_est: (row.total_cost / dateRangeDays) * 30,
+    daily_avg_cost: totals.total_cost / dateRangeDays,
+    monthly_est: (totals.total_cost / dateRangeDays) * 30,
     date_range_days: dateRangeDays,
-    total_errors: row.total_errors,
-    avg_duration: row.avg_duration,
-    total_tool_calls: row.total_tool_calls,
+    total_errors: totals.total_errors,
+    avg_duration: parents.avg_duration,
+    total_tool_calls: totals.total_tool_calls,
   }
 }
 
@@ -303,11 +314,12 @@ export function queryAllDates(db: Database, filters: Filters): string[] {
 }
 
 export function queryTotalHours(db: Database, filters: Filters): { active: number; activeDays: number } {
-  const { clause, params } = buildWhere({ ...filters, excludeSubagents: true })
+  const { clause, params } = buildWhere(filters)
+  const parentClause = appendCondition(clause, 'is_subagent = 0')
   const row = queryOne<{ total: number; days: number }>(db, `
     SELECT COALESCE(SUM(active_duration_s), 0) as total,
       COUNT(DISTINCT start_date) as days
-    FROM sessions ${clause}
+    FROM sessions ${parentClause}
   `, params)
   return {
     active: (row?.total ?? 0) / 3600,
