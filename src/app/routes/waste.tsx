@@ -61,7 +61,7 @@ function WastePage() {
         <KpiCard
           label="Heavy Compaction"
           value={formatNumber(waste.compaction_sessions.length)}
-          subtext="2+ compactions"
+          subtext="3+ compactions"
         />
         <KpiCard
           label="Output Ratio"
@@ -71,7 +71,7 @@ function WastePage() {
         <KpiCard
           label="Excessive Reads"
           value={formatNumber(repeatedReads.length)}
-          subtext="10+ file reads in session"
+          subtext="20+ file reads in session"
         />
       </KpiGrid>
 
@@ -102,7 +102,7 @@ function WastePage() {
           <CardTitle>Heavy Compaction Sessions</CardTitle>
           <CardContent>
             <p className="text-xs text-text-secondary mb-3">
-              2+ context compactions = the agent hit context limits and had to summarize, losing earlier context.
+              3+ context compactions = the agent hit context limits repeatedly, likely losing track of earlier work.
             </p>
             <WasteTable sessions={waste.compaction_sessions} highlight="compaction" />
           </CardContent>
@@ -112,7 +112,7 @@ function WastePage() {
           <CardTitle>Excessive File Reads</CardTitle>
           <CardContent>
             <p className="text-xs text-text-secondary mb-3">
-              Sessions with 10+ read-tool calls — often re-reading files after compaction wiped context.
+              Sessions with 20+ read-tool calls — often re-reading files after compaction wiped context.
             </p>
             <ReadsTable reads={repeatedReads} />
           </CardContent>

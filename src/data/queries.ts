@@ -317,40 +317,42 @@ export function queryAllDates(db: Database, filters: Filters): string[] {
 export function queryWasteOverview(db: Database, filters: Filters): WasteOverview {
   const { clause, params } = buildWhere(filters)
 
-  // Median cost (approximate via SQL)
+  // Median cost: compute offset in JS (SQLite doesn't support subquery in OFFSET)
+  const countRow = queryOne<{ cnt: number }>(db, `
+    SELECT COUNT(*) as cnt FROM sessions ${appendCondition(clause, 'cost > 0')}
+  `, params)
+  const medianOffset = Math.floor((countRow?.cnt ?? 0) / 2)
   const medianRow = queryOne<{ median_cost: number }>(db, `
     SELECT cost as median_cost FROM sessions ${appendCondition(clause, 'cost > 0')}
-    ORDER BY cost LIMIT 1 OFFSET (
-      SELECT COUNT(*) / 2 FROM sessions ${appendCondition(clause, 'cost > 0')}
-    )
-  `, params)
+    ORDER BY cost LIMIT 1 OFFSET $medianOffset
+  `, { ...params, $medianOffset: medianOffset })
   const median = medianRow?.median_cost ?? 0
 
-  // Cost outliers: 3x+ median
-  const outlierThreshold = median * 3
-  const outliers = outlierThreshold > 0 ? query<WasteSession>(db, `
+  // Cost outliers: 3x+ median, with $0.50 floor to avoid noise from cheap sessions
+  const outlierThreshold = Math.max(median * 3, 0.50)
+  const outliers = query<WasteSession>(db, `
     SELECT id, slug, project, cost, duration_s, input_tokens, output_tokens,
       compactions, tool_calls, error_count, start_date, 'cost_outlier' as reason
     FROM sessions ${appendCondition(clause, 'cost >= $outlierThreshold')}
     ORDER BY cost DESC LIMIT 50
-  `, { ...params, $outlierThreshold: outlierThreshold }) : []
+  `, { ...params, $outlierThreshold: outlierThreshold })
 
-  // Floundering: output < 5% of total tokens (mostly reading, barely writing)
+  // Floundering: output < 5% of fresh tokens (excluding cache reads which inflate denominator)
   const floundering = query<WasteSession>(db, `
     SELECT id, slug, project, cost, duration_s, input_tokens, output_tokens,
       compactions, tool_calls, error_count, start_date, 'floundering' as reason
     FROM sessions ${appendCondition(clause,
-      'output_tokens > 0 AND (input_tokens + cache_read_tokens) > 0 AND ' +
-      'CAST(output_tokens AS REAL) / (input_tokens + cache_read_tokens + output_tokens) < 0.05 AND cost > 0.10'
+      'output_tokens > 0 AND input_tokens > 0 AND ' +
+      'CAST(output_tokens AS REAL) / (input_tokens + output_tokens) < 0.05 AND cost > 0.10'
     )}
     ORDER BY cost DESC LIMIT 50
   `, params)
 
-  // Heavy compaction sessions (2+ compactions = agent going in circles)
+  // Heavy compaction sessions (3+ compactions = likely going in circles; 1-2 is normal for long sessions)
   const compactionSessions = query<WasteSession>(db, `
     SELECT id, slug, project, cost, duration_s, input_tokens, output_tokens,
       compactions, tool_calls, error_count, start_date, 'compaction' as reason
-    FROM sessions ${appendCondition(clause, 'compactions >= 2 AND cost > 0.10')}
+    FROM sessions ${appendCondition(clause, 'compactions >= 3 AND cost > 0.10')}
     ORDER BY compactions DESC, cost DESC LIMIT 50
   `, params)
 
@@ -373,7 +375,7 @@ export function queryWasteOverview(db: Database, filters: Filters): WasteOvervie
   for (const s of [...outliers, ...floundering, ...compactionSessions]) {
     if (!wasteIds.has(s.id)) {
       wasteIds.add(s.id)
-      wasteCost += s.cost
+      wasteCost += s.cost ?? 0
     }
   }
 
@@ -397,7 +399,7 @@ export function queryRepeatedReads(db: Database, filters: Filters): RepeatedRead
     FROM session_tools t
     JOIN sessions s ON t.session_id = s.id
     ${sessionFilter}
-    ${andOrWhere} t.tool_name IN ('Read', 'ReadFile', 'read_file', 'View') AND t.call_count >= 10
+    ${andOrWhere} t.tool_name IN ('Read', 'ReadFile', 'read_file', 'View') AND t.call_count >= 20
     ORDER BY t.call_count DESC LIMIT 50
   `, params)
 }
