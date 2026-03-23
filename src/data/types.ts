@@ -141,3 +141,38 @@ export interface HeatmapCell {
   cost: number
   sessions: number
 }
+
+export interface WasteSession {
+  id: string
+  slug: string | null
+  project: string
+  cost: number
+  duration_s: number
+  input_tokens: number
+  output_tokens: number
+  compactions: number
+  tool_calls: number
+  error_count: number
+  start_date: string | null
+  reason: string
+}
+
+export interface WasteOverview {
+  median_cost: number
+  outlier_sessions: WasteSession[]
+  floundering_sessions: WasteSession[]
+  compaction_sessions: WasteSession[]
+  output_ratio: number
+  total_waste_cost: number
+  total_cost: number
+}
+
+export interface RepeatedRead {
+  session_id: string
+  slug: string | null
+  project: string
+  cost: number
+  tool_name: string
+  call_count: number
+  start_date: string | null
+}

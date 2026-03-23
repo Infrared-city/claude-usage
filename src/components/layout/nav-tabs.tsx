@@ -1,7 +1,7 @@
 import { Link, useRouterState } from '@tanstack/react-router'
 import { cn } from '@/lib/utils'
 import {
-  LayoutDashboard, DollarSign, Table2, Coins, Activity, AlertTriangle,
+  LayoutDashboard, DollarSign, Table2, Coins, Activity, AlertTriangle, Flame,
 } from 'lucide-react'
 import { ScanStatus } from './scan-status'
 
@@ -12,6 +12,7 @@ const tabs = [
   { path: '/tokens', label: 'Tokens', icon: Coins, key: '4' },
   { path: '/patterns', label: 'Patterns', icon: Activity, key: '5' },
   { path: '/errors', label: 'Errors', icon: AlertTriangle, key: '6' },
+  { path: '/waste', label: 'Waste', icon: Flame, key: '7' },
 ] as const
 
 export function NavTabs() {

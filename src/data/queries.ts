@@ -4,6 +4,7 @@ import type {
   SessionRow, DailyCost, ModelBreakdown, ProjectBreakdown,
   HourlyCost, ToolUsage, ErrorSummary, TokenEconomics, KpiData,
   Filters, DailyModelCost, CostBucket, SessionScatter, HeatmapCell, ToolRow,
+  WasteSession, WasteOverview, RepeatedRead,
 } from './types'
 
 function buildWhere(filters: Filters): { clause: string; params: Record<string, unknown> } {
@@ -311,6 +312,94 @@ export function queryAllDates(db: Database, filters: Filters): string[] {
     ${appendCondition(clause, 'start_date IS NOT NULL')}
     ORDER BY date
   `, params).map((r) => r.date)
+}
+
+export function queryWasteOverview(db: Database, filters: Filters): WasteOverview {
+  const { clause, params } = buildWhere(filters)
+
+  // Median cost (approximate via SQL)
+  const medianRow = queryOne<{ median_cost: number }>(db, `
+    SELECT cost as median_cost FROM sessions ${appendCondition(clause, 'cost > 0')}
+    ORDER BY cost LIMIT 1 OFFSET (
+      SELECT COUNT(*) / 2 FROM sessions ${appendCondition(clause, 'cost > 0')}
+    )
+  `, params)
+  const median = medianRow?.median_cost ?? 0
+
+  // Cost outliers: 3x+ median
+  const outlierThreshold = median * 3
+  const outliers = outlierThreshold > 0 ? query<WasteSession>(db, `
+    SELECT id, slug, project, cost, duration_s, input_tokens, output_tokens,
+      compactions, tool_calls, error_count, start_date, 'cost_outlier' as reason
+    FROM sessions ${appendCondition(clause, 'cost >= $outlierThreshold')}
+    ORDER BY cost DESC LIMIT 50
+  `, { ...params, $outlierThreshold: outlierThreshold }) : []
+
+  // Floundering: output < 5% of total tokens (mostly reading, barely writing)
+  const floundering = query<WasteSession>(db, `
+    SELECT id, slug, project, cost, duration_s, input_tokens, output_tokens,
+      compactions, tool_calls, error_count, start_date, 'floundering' as reason
+    FROM sessions ${appendCondition(clause,
+      'output_tokens > 0 AND (input_tokens + cache_read_tokens) > 0 AND ' +
+      'CAST(output_tokens AS REAL) / (input_tokens + cache_read_tokens + output_tokens) < 0.05 AND cost > 0.10'
+    )}
+    ORDER BY cost DESC LIMIT 50
+  `, params)
+
+  // Heavy compaction sessions (2+ compactions = agent going in circles)
+  const compactionSessions = query<WasteSession>(db, `
+    SELECT id, slug, project, cost, duration_s, input_tokens, output_tokens,
+      compactions, tool_calls, error_count, start_date, 'compaction' as reason
+    FROM sessions ${appendCondition(clause, 'compactions >= 2 AND cost > 0.10')}
+    ORDER BY compactions DESC, cost DESC LIMIT 50
+  `, params)
+
+  // Overall output ratio
+  const ratioRow = queryOne<{ inp: number; out: number }>(db, `
+    SELECT COALESCE(SUM(input_tokens + cache_read_tokens), 0) as inp,
+      COALESCE(SUM(output_tokens), 0) as out
+    FROM sessions ${clause}
+  `, params)!
+  const outputRatio = ratioRow.out > 0 ? ratioRow.out / (ratioRow.inp + ratioRow.out) : 0
+
+  // Total cost in filtered range
+  const totalRow = queryOne<{ total: number }>(db, `
+    SELECT COALESCE(SUM(cost), 0) as total FROM sessions ${clause}
+  `, params)!
+
+  // Sum waste cost (union of outlier + floundering + compaction, deduplicated)
+  const wasteIds = new Set<string>()
+  let wasteCost = 0
+  for (const s of [...outliers, ...floundering, ...compactionSessions]) {
+    if (!wasteIds.has(s.id)) {
+      wasteIds.add(s.id)
+      wasteCost += s.cost
+    }
+  }
+
+  return {
+    median_cost: median,
+    outlier_sessions: outliers,
+    floundering_sessions: floundering,
+    compaction_sessions: compactionSessions,
+    output_ratio: outputRatio,
+    total_waste_cost: wasteCost,
+    total_cost: totalRow.total,
+  }
+}
+
+export function queryRepeatedReads(db: Database, filters: Filters): RepeatedRead[] {
+  const { clause, params } = buildWhere(filters)
+  const sessionFilter = clause ? `WHERE t.session_id IN (SELECT id FROM sessions ${clause})` : ''
+  const andOrWhere = sessionFilter ? 'AND' : 'WHERE'
+  return query<RepeatedRead>(db, `
+    SELECT t.session_id, s.slug, s.project, s.cost, t.tool_name, t.call_count, s.start_date
+    FROM session_tools t
+    JOIN sessions s ON t.session_id = s.id
+    ${sessionFilter}
+    ${andOrWhere} t.tool_name IN ('Read', 'ReadFile', 'read_file', 'View') AND t.call_count >= 10
+    ORDER BY t.call_count DESC LIMIT 50
+  `, params)
 }
 
 export function queryTotalHours(db: Database, filters: Filters): { active: number; activeDays: number } {

@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WasteRouteImport } from './routes/waste'
 import { Route as TokensRouteImport } from './routes/tokens'
 import { Route as SessionsRouteImport } from './routes/sessions'
 import { Route as PatternsRouteImport } from './routes/patterns'
@@ -17,6 +18,11 @@ import { Route as ErrorsRouteImport } from './routes/errors'
 import { Route as CostsRouteImport } from './routes/costs'
 import { Route as IndexRouteImport } from './routes/index'
 
+const WasteRoute = WasteRouteImport.update({
+  id: '/waste',
+  path: '/waste',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TokensRoute = TokensRouteImport.update({
   id: '/tokens',
   path: '/tokens',
@@ -61,6 +67,7 @@ export interface FileRoutesByFullPath {
   '/patterns': typeof PatternsRoute
   '/sessions': typeof SessionsRoute
   '/tokens': typeof TokensRoute
+  '/waste': typeof WasteRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -70,6 +77,7 @@ export interface FileRoutesByTo {
   '/patterns': typeof PatternsRoute
   '/sessions': typeof SessionsRoute
   '/tokens': typeof TokensRoute
+  '/waste': typeof WasteRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -80,6 +88,7 @@ export interface FileRoutesById {
   '/patterns': typeof PatternsRoute
   '/sessions': typeof SessionsRoute
   '/tokens': typeof TokensRoute
+  '/waste': typeof WasteRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -91,6 +100,7 @@ export interface FileRouteTypes {
     | '/patterns'
     | '/sessions'
     | '/tokens'
+    | '/waste'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -100,6 +110,7 @@ export interface FileRouteTypes {
     | '/patterns'
     | '/sessions'
     | '/tokens'
+    | '/waste'
   id:
     | '__root__'
     | '/'
@@ -109,6 +120,7 @@ export interface FileRouteTypes {
     | '/patterns'
     | '/sessions'
     | '/tokens'
+    | '/waste'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -119,10 +131,18 @@ export interface RootRouteChildren {
   PatternsRoute: typeof PatternsRoute
   SessionsRoute: typeof SessionsRoute
   TokensRoute: typeof TokensRoute
+  WasteRoute: typeof WasteRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/waste': {
+      id: '/waste'
+      path: '/waste'
+      fullPath: '/waste'
+      preLoaderRoute: typeof WasteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/tokens': {
       id: '/tokens'
       path: '/tokens'
@@ -183,6 +203,7 @@ const rootRouteChildren: RootRouteChildren = {
   PatternsRoute: PatternsRoute,
   SessionsRoute: SessionsRoute,
   TokensRoute: TokensRoute,
+  WasteRoute: WasteRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
