@@ -17,6 +17,9 @@ import {
 import { useState, useMemo, Fragment } from 'react'
 import type { SessionRow, ToolRow } from '@/data/types'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Search, Download } from 'lucide-react'
+import { InfoTip } from '@/components/ui/info-tip'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { WasteColumnTip, WasteScoreBreakdownTip, OutPercentTip, CompactionsTip } from '@/components/ui/tooltip-content'
 
 export const Route = createFileRoute('/sessions')({ component: SessionsPage })
 
@@ -94,7 +97,7 @@ function SessionsPage() {
     }),
     col.display({
       id: 'waste_score',
-      header: 'Waste',
+      header: () => <span className="flex items-center gap-1">Waste <InfoTip><WasteColumnTip /></InfoTip></span>,
       enableSorting: false,
       cell: (i) => {
         const ws = wasteScores?.get(i.row.original.id)
@@ -266,17 +269,16 @@ function SessionDetail({ session, db }: { session: SessionRow; db: import('sql.j
 
 function WasteScoreBadge({ score }: { score: { score: number; cost_outlier: number; floundering: number; compaction: number; file_rereads: number } }) {
   const variant = score.score >= 50 ? 'error' : score.score >= 20 ? 'warning' : 'default'
-  const contributors = [
-    score.cost_outlier > 0 && `Cost: ${score.cost_outlier}`,
-    score.floundering > 0 && `Flounder: ${score.floundering}`,
-    score.compaction > 0 && `Compact: ${score.compaction}`,
-    score.file_rereads > 0 && `Re-reads: ${score.file_rereads}`,
-  ].filter(Boolean).join(' / ')
 
   return (
-    <Badge variant={variant} title={contributors || `Score: ${score.score}`}>
-      {score.score}
-    </Badge>
+    <Tooltip>
+      <TooltipTrigger asChild onClick={(e) => e.stopPropagation()}>
+        <span><Badge variant={variant}>{score.score}</Badge></span>
+      </TooltipTrigger>
+      <TooltipContent>
+        <WasteScoreBreakdownTip score={score} />
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

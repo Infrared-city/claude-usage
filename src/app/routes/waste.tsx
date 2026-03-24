@@ -8,6 +8,12 @@ import { KpiGrid } from '@/components/stats/kpi-grid'
 import { Card, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { formatCost, formatNumber, formatPercent, formatDuration } from '@/lib/format'
+import { InfoTip } from '@/components/ui/info-tip'
+import {
+  WasteFlaggedTip, CostOutliersTip, FlounderingTip, HeavyCompactionTip,
+  OutputRatioTip, FileRereadsTip, WasteByProjectTip, FileRereadHotspotsTip,
+  OutPercentTip, CompactionsTip,
+} from '@/components/ui/tooltip-content'
 import type { WasteSession, RepeatedRead, FileReadHotspot, ProjectWaste } from '@/data/types'
 
 export const Route = createFileRoute('/waste')({ component: WastePage })
@@ -59,37 +65,43 @@ function WastePage() {
           label="Waste Flagged"
           value={formatCost(waste.total_waste_cost)}
           subtext={`${formatPercent(wastePercent)} of total spend`}
+          tooltip={<InfoTip><WasteFlaggedTip /></InfoTip>}
         />
         <KpiCard
           label="Cost Outliers"
           value={formatNumber(waste.outlier_sessions.length)}
           subtext={`>3x median (${formatCost(waste.median_cost)})`}
+          tooltip={<InfoTip><CostOutliersTip /></InfoTip>}
         />
         <KpiCard
           label="Floundering"
           value={formatNumber(waste.floundering_sessions.length)}
           subtext="<5% output ratio"
+          tooltip={<InfoTip><FlounderingTip /></InfoTip>}
         />
         <KpiCard
           label="Heavy Compaction"
           value={formatNumber(waste.compaction_sessions.length)}
           subtext="3+ compactions"
+          tooltip={<InfoTip><HeavyCompactionTip /></InfoTip>}
         />
         <KpiCard
           label="Output Ratio"
           value={formatPercent(outputPercent)}
           subtext="tokens writing vs reading"
+          tooltip={<InfoTip><OutputRatioTip /></InfoTip>}
         />
         <KpiCard
           label="File Re-reads"
           value={formatNumber(fileHotspots.length)}
           subtext="same file 3x+ in session"
+          tooltip={<InfoTip><FileRereadsTip /></InfoTip>}
         />
       </KpiGrid>
 
       {projectWaste.length > 0 && (
         <Card>
-          <CardTitle>Waste by Project</CardTitle>
+          <CardTitle><span className="flex items-center gap-1.5">Waste by Project <InfoTip><WasteByProjectTip /></InfoTip></span></CardTitle>
           <CardContent>
             <p className="text-xs text-text-secondary mb-3">
               Projects ranked by total waste cost. Bar shows waste proportion of total spend.
@@ -133,7 +145,7 @@ function WastePage() {
         </Card>
 
         <Card>
-          <CardTitle>File Re-read Hotspots</CardTitle>
+          <CardTitle><span className="flex items-center gap-1.5">File Re-read Hotspots <InfoTip><FileRereadHotspotsTip /></InfoTip></span></CardTitle>
           <CardContent>
             <p className="text-xs text-text-secondary mb-3">
               Same file read 3+ times in a single session — a sign the agent forgot what it already read.
@@ -281,7 +293,11 @@ function WasteTable({ sessions, highlight }: { sessions: WasteSession[]; highlig
             <th className="text-left py-1.5 px-2 font-medium text-text-secondary">Project</th>
             <th className="text-right py-1.5 px-2 font-medium text-text-secondary">Cost</th>
             <th className="text-right py-1.5 px-2 font-medium text-text-secondary">
-              {highlight === 'ratio' ? 'Out %' : highlight === 'compaction' ? 'Compactions' : 'Duration'}
+              {highlight === 'ratio' ? (
+                <span className="flex items-center justify-end gap-1">Out % <InfoTip><OutPercentTip /></InfoTip></span>
+              ) : highlight === 'compaction' ? (
+                <span className="flex items-center justify-end gap-1">Compactions <InfoTip><CompactionsTip /></InfoTip></span>
+              ) : 'Duration'}
             </th>
           </tr>
         </thead>
