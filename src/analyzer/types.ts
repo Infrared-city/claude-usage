@@ -41,6 +41,7 @@ export interface ParsedSession {
   sidechain_msgs: number
   is_subagent: boolean
   rate_limit_blocks: RateLimitBlock[]
+  file_reads: Record<string, number>
 }
 
 export type FileManifest = Record<string, { size: number; lastModified: number }>

@@ -2,7 +2,7 @@ import type { ParsedSession } from './types'
 import { PRICING } from './pricing'
 import { CREATE_TABLES, CREATE_INDEXES } from './schema'
 
-const ANALYZER_VERSION = '2.0.0'
+const ANALYZER_VERSION = '2.1.0'
 
 export async function buildDatabase(sessions: ParsedSession[]): Promise<Uint8Array> {
   const initSqlJs = (await import('sql.js')).default
@@ -42,6 +42,10 @@ export async function buildDatabase(sessions: ParsedSession[]): Promise<Uint8Arr
 
   const insertRateLimit = db.prepare(`
     INSERT INTO rate_limit_blocks (session_id, start_ts, resume_ts, reset_text) VALUES (?,?,?,?)
+  `)
+
+  const insertFileRead = db.prepare(`
+    INSERT OR REPLACE INTO session_file_reads (session_id, file_path, read_count) VALUES (?,?,?)
   `)
 
   for (const s of sessions) {
@@ -102,6 +106,12 @@ export async function buildDatabase(sessions: ParsedSession[]): Promise<Uint8Arr
     for (const rl of s.rate_limit_blocks) {
       insertRateLimit.run([s.session_id, rl.start_ts, rl.resume_ts, rl.reset_text])
     }
+
+    // File reads
+    db.run('DELETE FROM session_file_reads WHERE session_id = ?', [s.session_id])
+    for (const [filePath, readCount] of Object.entries(s.file_reads)) {
+      insertFileRead.run([s.session_id, filePath, readCount])
+    }
   }
 
   // Meta
@@ -114,6 +124,7 @@ export async function buildDatabase(sessions: ParsedSession[]): Promise<Uint8Arr
   insertTool.free()
   insertError.free()
   insertRateLimit.free()
+  insertFileRead.free()
 
   db.run('COMMIT')
 

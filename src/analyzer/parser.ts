@@ -37,6 +37,7 @@ export function parseSession(text: string, relativePath: string): ParsedSession 
   const timestamps: string[] = []
   let userMsgCount = 0
   const toolUses = new Map<string, number>()
+  const fileReads = new Map<string, number>()
   const turnDurations: number[] = []
   let compactions = 0
   let maxPreTokens = 0
@@ -141,6 +142,11 @@ export function parseSession(text: string, relativePath: string): ParsedSession 
             if (c.type === 'tool_use') {
               const name = (c.name as string) ?? 'unknown'
               toolUses.set(name, (toolUses.get(name) ?? 0) + 1)
+              if (['Read', 'ReadFile', 'read_file', 'View'].includes(name)) {
+                const input = c.input as Record<string, unknown> | undefined
+                const fp = (input?.file_path ?? input?.path) as string | undefined
+                if (fp) fileReads.set(fp, (fileReads.get(fp) ?? 0) + 1)
+              }
             }
           }
         }
@@ -267,5 +273,6 @@ export function parseSession(text: string, relativePath: string): ParsedSession 
     sidechain_msgs: sidechainMsgs,
     is_subagent: isSubagent,
     rate_limit_blocks: rateLimitBlocks,
+    file_reads: Object.fromEntries(fileReads),
   }
 }

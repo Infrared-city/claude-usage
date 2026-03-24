@@ -35,6 +35,13 @@ export const CREATE_TABLES = `
     start_ts TEXT, resume_ts TEXT, reset_text TEXT
   );
 
+  CREATE TABLE IF NOT EXISTS session_file_reads (
+    session_id TEXT REFERENCES sessions(id),
+    file_path TEXT,
+    read_count INT,
+    PRIMARY KEY (session_id, file_path)
+  );
+
   CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY, value TEXT
   );

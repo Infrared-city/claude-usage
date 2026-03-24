@@ -176,3 +176,30 @@ export interface RepeatedRead {
   call_count: number
   start_date: string | null
 }
+
+export interface FileReadHotspot {
+  session_id: string
+  slug: string | null
+  project: string
+  cost: number
+  file_path: string
+  read_count: number
+  start_date: string | null
+}
+
+export interface ProjectWaste {
+  project: string
+  total_cost: number
+  waste_cost: number
+  waste_sessions: number
+  total_sessions: number
+  waste_pct: number
+}
+
+export interface WasteScore {
+  score: number
+  cost_outlier: number
+  floundering: number
+  compaction: number
+  file_rereads: number
+}

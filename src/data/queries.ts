@@ -4,7 +4,7 @@ import type {
   SessionRow, DailyCost, ModelBreakdown, ProjectBreakdown,
   HourlyCost, ToolUsage, ErrorSummary, TokenEconomics, KpiData,
   Filters, DailyModelCost, CostBucket, SessionScatter, HeatmapCell, ToolRow,
-  WasteSession, WasteOverview, RepeatedRead,
+  WasteSession, WasteOverview, RepeatedRead, FileReadHotspot, ProjectWaste,
 } from './types'
 
 function buildWhere(filters: Filters): { clause: string; params: Record<string, unknown> } {
@@ -416,4 +416,132 @@ export function queryTotalHours(db: Database, filters: Filters): { active: numbe
     active: (row?.total ?? 0) / 3600,
     activeDays: row?.days ?? 1,
   }
+}
+
+export function queryFileReadHotspots(db: Database, filters: Filters): FileReadHotspot[] {
+  const { clause, params } = buildWhere(filters)
+  const sessionFilter = clause ? `WHERE fr.session_id IN (SELECT id FROM sessions ${clause})` : ''
+  const andOrWhere = sessionFilter ? 'AND' : 'WHERE'
+  return query<FileReadHotspot>(db, `
+    SELECT fr.session_id, s.slug, s.project, s.cost, fr.file_path, fr.read_count, s.start_date
+    FROM session_file_reads fr
+    JOIN sessions s ON fr.session_id = s.id
+    ${sessionFilter}
+    ${andOrWhere} fr.read_count >= 3
+    ORDER BY fr.read_count DESC LIMIT 50
+  `, params)
+}
+
+export function queryProjectWaste(db: Database, filters: Filters): ProjectWaste[] {
+  const waste = queryWasteOverview(db, filters)
+  const wasteByProject = new Map<string, { cost: number; ids: Set<string> }>()
+
+  for (const s of [...waste.outlier_sessions, ...waste.floundering_sessions, ...waste.compaction_sessions]) {
+    const entry = wasteByProject.get(s.project) ?? { cost: 0, ids: new Set() }
+    if (!entry.ids.has(s.id)) {
+      entry.ids.add(s.id)
+      entry.cost += s.cost ?? 0
+    }
+    wasteByProject.set(s.project, entry)
+  }
+
+  const { clause, params } = buildWhere(filters)
+  const projectTotals = query<{ project: string; total_cost: number; total_sessions: number }>(db, `
+    SELECT project, SUM(cost) as total_cost, COUNT(*) as total_sessions
+    FROM sessions ${clause}
+    GROUP BY project
+  `, params)
+
+  return projectTotals
+    .map((p) => {
+      const w = wasteByProject.get(p.project)
+      const wasteCost = w?.cost ?? 0
+      return {
+        project: p.project,
+        total_cost: p.total_cost,
+        waste_cost: wasteCost,
+        waste_sessions: w?.ids.size ?? 0,
+        total_sessions: p.total_sessions,
+        waste_pct: p.total_cost > 0 ? wasteCost / p.total_cost : 0,
+      }
+    })
+    .filter((p) => p.waste_cost > 0)
+    .sort((a, b) => b.waste_cost - a.waste_cost)
+}
+
+/** Compute a 0–100 waste score for a single session */
+export function computeWasteScore(
+  session: SessionRow,
+  medianCost: number,
+  maxFileRereads: number,
+): { score: number; cost_outlier: number; floundering: number; compaction: number; file_rereads: number } {
+  // Cost outlier: 0-40 points. At threshold = 20, at 10x threshold = 40
+  const outlierThreshold = Math.max(medianCost * 3, 0.50)
+  let costOutlier = 0
+  if (session.cost >= outlierThreshold) {
+    const ratio = session.cost / outlierThreshold
+    costOutlier = Math.min(40, Math.round(ratio * 20))
+  }
+
+  // Floundering: 0-25 points. <5% output = 25, <10% = partial
+  const totalFresh = session.input_tokens + session.output_tokens
+  const outRatio = totalFresh > 0 ? session.output_tokens / totalFresh : 0
+  let floundering = 0
+  if (outRatio < 0.05 && session.cost > 0.10) {
+    floundering = 25
+  } else if (outRatio < 0.10 && session.cost > 0.10) {
+    floundering = Math.round((1 - outRatio / 0.10) * 25)
+  }
+
+  // Compaction: 0-20 points. 3+ = 10, 5+ = 15, 8+ = 20
+  let compaction = 0
+  if (session.compactions >= 8) compaction = 20
+  else if (session.compactions >= 5) compaction = 15
+  else if (session.compactions >= 3) compaction = 10
+
+  // File rereads: 0-15 points, scaled by max in dataset
+  let fileRereads = 0
+  if (maxFileRereads > 0) {
+    fileRereads = Math.min(15, Math.round((maxFileRereads / 10) * 15))
+  }
+
+  const score = Math.min(100, costOutlier + floundering + compaction + fileRereads)
+  return { score, cost_outlier: costOutlier, floundering, compaction, file_rereads: fileRereads }
+}
+
+/** Batch-compute waste scores for all sessions, returns Map<session_id, WasteScore> */
+export function queryWasteScores(db: Database, filters: Filters): Map<string, { score: number; cost_outlier: number; floundering: number; compaction: number; file_rereads: number }> {
+  const { clause, params } = buildWhere(filters)
+
+  // Median cost
+  const countRow = queryOne<{ cnt: number }>(db, `
+    SELECT COUNT(*) as cnt FROM sessions ${appendCondition(clause, 'cost > 0')}
+  `, params)
+  const medianOffset = Math.floor((countRow?.cnt ?? 0) / 2)
+  const medianRow = queryOne<{ median_cost: number }>(db, `
+    SELECT cost as median_cost FROM sessions ${appendCondition(clause, 'cost > 0')}
+    ORDER BY cost LIMIT 1 OFFSET $medianOffset
+  `, { ...params, $medianOffset: medianOffset })
+  const median = medianRow?.median_cost ?? 0
+
+  // Max file rereads per session
+  const fileReadRows = query<{ session_id: string; max_reads: number }>(db, `
+    SELECT session_id, MAX(read_count) as max_reads
+    FROM session_file_reads
+    WHERE read_count >= 3 ${clause ? `AND session_id IN (SELECT id FROM sessions ${clause})` : ''}
+    GROUP BY session_id
+  `, params)
+  const fileReadMap = new Map(fileReadRows.map((r) => [r.session_id, r.max_reads]))
+
+  // All sessions
+  const sessions = query<SessionRow>(db, `SELECT * FROM sessions ${clause}`, params)
+  const result = new Map<string, { score: number; cost_outlier: number; floundering: number; compaction: number; file_rereads: number }>()
+
+  for (const s of sessions) {
+    const maxReads = fileReadMap.get(s.id) ?? 0
+    const ws = computeWasteScore(s, median, maxReads)
+    if (ws.score > 0) result.set(s.id, ws)
+  }
+
+  return result
 }

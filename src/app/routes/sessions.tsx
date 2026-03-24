@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { initDb } from '@/data/db'
-import { querySessions, queryKpis, querySessionTools } from '@/data/queries'
+import { querySessions, queryKpis, querySessionTools, queryWasteScores } from '@/data/queries'
 import { useFilters } from '@/stores/filter-store'
 import { KpiCard } from '@/components/stats/kpi-card'
 import { KpiGrid } from '@/components/stats/kpi-grid'
@@ -14,7 +14,7 @@ import {
   getFilteredRowModel, getPaginationRowModel,
   createColumnHelper, flexRender, type SortingState,
 } from '@tanstack/react-table'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, Fragment } from 'react'
 import type { SessionRow, ToolRow } from '@/data/types'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Search, Download } from 'lucide-react'
 
@@ -35,6 +35,13 @@ function SessionsPage() {
   const { data: kpis } = useQuery({
     queryKey: ['kpis', filters],
     queryFn: () => queryKpis(db!, filters),
+    enabled: !!db,
+    placeholderData: (prev) => prev,
+  })
+
+  const { data: wasteScores } = useQuery({
+    queryKey: ['wasteScores', filters],
+    queryFn: () => queryWasteScores(db!, filters),
     enabled: !!db,
     placeholderData: (prev) => prev,
   })
@@ -85,7 +92,18 @@ function SessionsPage() {
       cell: (i) => i.getValue() > 0 ? <Badge variant="error">{i.getValue()}</Badge> : '—',
       size: 55,
     }),
-  ], [])
+    col.display({
+      id: 'waste_score',
+      header: 'Waste',
+      enableSorting: false,
+      cell: (i) => {
+        const ws = wasteScores?.get(i.row.original.id)
+        if (!ws || ws.score === 0) return <span className="text-text-secondary">—</span>
+        return <WasteScoreBadge score={ws} />
+      },
+      size: 60,
+    }),
+  ], [wasteScores])
 
   const table = useReactTable({
     data: sessions,
@@ -101,9 +119,10 @@ function SessionsPage() {
   })
 
   function exportCsv() {
-    const headers = columns.map((c) => c.header as string)
+    const accessorCols = table.getAllColumns().filter((c) => c.accessorFn)
+    const headers = accessorCols.map((c) => c.columnDef.header as string)
     const rows = table.getFilteredRowModel().rows.map((row) =>
-      row.getVisibleCells().map((cell) => cell.getValue())
+      accessorCols.map((c) => row.getValue(c.id))
     )
     const csv = [headers, ...rows].map((r) => r.join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
@@ -166,9 +185,8 @@ function SessionsPage() {
             </thead>
             <tbody>
               {table.getRowModel().rows.map((row) => (
-                <>
+                <Fragment key={row.id}>
                   <tr
-                    key={row.id}
                     className="border-b border-border/50 hover:bg-bg-elevated/50 cursor-pointer"
                     onClick={() => setExpandedRow(expandedRow === row.original.id ? null : row.original.id)}
                   >
@@ -185,7 +203,7 @@ function SessionsPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -243,6 +261,22 @@ function SessionDetail({ session, db }: { session: SessionRow; db: import('sql.j
         </div>
       </div>
     </div>
+  )
+}
+
+function WasteScoreBadge({ score }: { score: { score: number; cost_outlier: number; floundering: number; compaction: number; file_rereads: number } }) {
+  const variant = score.score >= 50 ? 'error' : score.score >= 20 ? 'warning' : 'default'
+  const contributors = [
+    score.cost_outlier > 0 && `Cost: ${score.cost_outlier}`,
+    score.floundering > 0 && `Flounder: ${score.floundering}`,
+    score.compaction > 0 && `Compact: ${score.compaction}`,
+    score.file_rereads > 0 && `Re-reads: ${score.file_rereads}`,
+  ].filter(Boolean).join(' / ')
+
+  return (
+    <Badge variant={variant} title={contributors || `Score: ${score.score}`}>
+      {score.score}
+    </Badge>
   )
 }
 

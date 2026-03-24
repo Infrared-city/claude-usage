@@ -1,14 +1,14 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { initDb } from '@/data/db'
-import { queryWasteOverview, queryRepeatedReads, queryKpis } from '@/data/queries'
+import { queryWasteOverview, queryRepeatedReads, queryKpis, queryFileReadHotspots, queryProjectWaste } from '@/data/queries'
 import { useFilters } from '@/stores/filter-store'
 import { KpiCard } from '@/components/stats/kpi-card'
 import { KpiGrid } from '@/components/stats/kpi-grid'
 import { Card, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { formatCost, formatNumber, formatPercent, formatDuration } from '@/lib/format'
-import type { WasteSession, RepeatedRead } from '@/data/types'
+import type { WasteSession, RepeatedRead, FileReadHotspot, ProjectWaste } from '@/data/types'
 
 export const Route = createFileRoute('/waste')({ component: WastePage })
 
@@ -31,6 +31,18 @@ function WastePage() {
   const { data: kpis } = useQuery({
     queryKey: ['kpis', filters],
     queryFn: () => queryKpis(db!, filters),
+    enabled: !!db,
+    placeholderData: (prev) => prev,
+  })
+  const { data: fileHotspots = [] } = useQuery({
+    queryKey: ['fileReadHotspots', filters],
+    queryFn: () => queryFileReadHotspots(db!, filters),
+    enabled: !!db,
+    placeholderData: (prev) => prev,
+  })
+  const { data: projectWaste = [] } = useQuery({
+    queryKey: ['projectWaste', filters],
+    queryFn: () => queryProjectWaste(db!, filters),
     enabled: !!db,
     placeholderData: (prev) => prev,
   })
@@ -69,11 +81,23 @@ function WastePage() {
           subtext="tokens writing vs reading"
         />
         <KpiCard
-          label="Excessive Reads"
-          value={formatNumber(repeatedReads.length)}
-          subtext="20+ file reads in session"
+          label="File Re-reads"
+          value={formatNumber(fileHotspots.length)}
+          subtext="same file 3x+ in session"
         />
       </KpiGrid>
+
+      {projectWaste.length > 0 && (
+        <Card>
+          <CardTitle>Waste by Project</CardTitle>
+          <CardContent>
+            <p className="text-xs text-text-secondary mb-3">
+              Projects ranked by total waste cost. Bar shows waste proportion of total spend.
+            </p>
+            <ProjectWasteTable projects={projectWaste} />
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
@@ -109,6 +133,18 @@ function WastePage() {
         </Card>
 
         <Card>
+          <CardTitle>File Re-read Hotspots</CardTitle>
+          <CardContent>
+            <p className="text-xs text-text-secondary mb-3">
+              Same file read 3+ times in a single session — a sign the agent forgot what it already read.
+            </p>
+            <FileHotspotsTable hotspots={fileHotspots} />
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
           <CardTitle>Excessive File Reads</CardTitle>
           <CardContent>
             <p className="text-xs text-text-secondary mb-3">
@@ -117,36 +153,118 @@ function WastePage() {
             <ReadsTable reads={repeatedReads} />
           </CardContent>
         </Card>
-      </div>
 
-      <Card>
-        <CardTitle>What This Means</CardTitle>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-text-secondary">
-            <div>
-              <p className="font-medium text-text-primary mb-1">Output Ratio: {formatPercent(outputPercent)}</p>
-              <p>
-                Only {formatPercent(outputPercent)} of your tokens are Claude writing code/responses.
-                The rest is reading context. Industry reference: one dev found only 0.7% was actual code output.
-              </p>
+        <Card>
+          <CardTitle>What This Means</CardTitle>
+          <CardContent>
+            <div className="space-y-4 text-xs text-text-secondary">
+              <div>
+                <p className="font-medium text-text-primary mb-1">Output Ratio: {formatPercent(outputPercent)}</p>
+                <p>
+                  Only {formatPercent(outputPercent)} of your tokens are Claude writing code/responses.
+                  The rest is reading context. Industry reference: one dev found only 0.7% was actual code output.
+                </p>
+              </div>
+              <div>
+                <p className="font-medium text-text-primary mb-1">Reduce Waste</p>
+                <p>
+                  Break large tasks into smaller sessions. Use CLAUDE.md to front-load context instead of
+                  re-reading files. Avoid ambiguous prompts that cause exploration spirals.
+                </p>
+              </div>
+              <div>
+                <p className="font-medium text-text-primary mb-1">Not All "Waste" Is Bad</p>
+                <p>
+                  High input ratios are normal for code review, exploration, and research tasks.
+                  Cost outliers during complex refactors are expected. Use these signals, don't optimize blindly.
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="font-medium text-text-primary mb-1">Reduce Waste</p>
-              <p>
-                Break large tasks into smaller sessions. Use CLAUDE.md to front-load context instead of
-                re-reading files. Avoid ambiguous prompts that cause exploration spirals.
-              </p>
-            </div>
-            <div>
-              <p className="font-medium text-text-primary mb-1">Not All "Waste" Is Bad</p>
-              <p>
-                High input ratios are normal for code review, exploration, and research tasks.
-                Cost outliers during complex refactors are expected. Use these signals, don't optimize blindly.
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+function ProjectWasteTable({ projects }: { projects: ProjectWaste[] }) {
+  if (projects.length === 0) return <p className="text-xs text-text-secondary">No waste detected</p>
+
+  const maxWaste = Math.max(...projects.map((p) => p.waste_cost))
+
+  return (
+    <div className="overflow-x-auto max-h-96 overflow-y-auto">
+      <table className="w-full text-xs">
+        <thead className="sticky top-0 bg-bg-card">
+          <tr className="border-b border-border">
+            <th className="text-left py-1.5 px-2 font-medium text-text-secondary">Project</th>
+            <th className="text-right py-1.5 px-2 font-medium text-text-secondary">Waste</th>
+            <th className="text-right py-1.5 px-2 font-medium text-text-secondary">Total</th>
+            <th className="text-right py-1.5 px-2 font-medium text-text-secondary">%</th>
+            <th className="text-left py-1.5 px-2 font-medium text-text-secondary w-32"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {projects.map((p) => (
+            <tr key={p.project} className="border-b border-border/30 hover:bg-bg-elevated/50">
+              <td className="py-1.5 px-2 truncate max-w-[160px]">{p.project}</td>
+              <td className="py-1.5 px-2 text-right font-medium">
+                <span className="text-warning">{formatCost(p.waste_cost)}</span>
+              </td>
+              <td className="py-1.5 px-2 text-right text-text-secondary">{formatCost(p.total_cost)}</td>
+              <td className="py-1.5 px-2 text-right">
+                <Badge variant={p.waste_pct > 0.5 ? 'error' : 'default'}>
+                  {formatPercent(p.waste_pct)}
+                </Badge>
+              </td>
+              <td className="py-1.5 px-2">
+                <div className="h-2 bg-bg-elevated rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-warning rounded-full"
+                    style={{ width: `${maxWaste > 0 ? (p.waste_cost / maxWaste) * 100 : 0}%` }}
+                  />
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function FileHotspotsTable({ hotspots }: { hotspots: FileReadHotspot[] }) {
+  if (hotspots.length === 0) return <p className="text-xs text-text-secondary">None found</p>
+
+  return (
+    <div className="overflow-x-auto max-h-80 overflow-y-auto">
+      <table className="w-full text-xs">
+        <thead className="sticky top-0 bg-bg-card">
+          <tr className="border-b border-border">
+            <th className="text-left py-1.5 px-2 font-medium text-text-secondary">File</th>
+            <th className="text-right py-1.5 px-2 font-medium text-text-secondary">Reads</th>
+            <th className="text-left py-1.5 px-2 font-medium text-text-secondary">Project</th>
+            <th className="text-right py-1.5 px-2 font-medium text-text-secondary">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {hotspots.map((h, i) => {
+            const shortPath = h.file_path.split('/').slice(-2).join('/')
+            return (
+              <tr key={`${h.session_id}-${i}`} className="border-b border-border/30 hover:bg-bg-elevated/50">
+                <td className="py-1.5 px-2 truncate max-w-[200px] font-mono text-[10px]" title={h.file_path}>
+                  {shortPath}
+                </td>
+                <td className="py-1.5 px-2 text-right">
+                  <Badge variant={h.read_count >= 5 ? 'error' : 'default'}>{h.read_count}x</Badge>
+                </td>
+                <td className="py-1.5 px-2 truncate max-w-[120px]">{h.project}</td>
+                <td className="py-1.5 px-2 text-right font-medium text-text-secondary">{formatCost(h.cost)}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }
