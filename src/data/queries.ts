@@ -473,9 +473,10 @@ export function queryProjectWaste(db: Database, filters: Filters): ProjectWaste[
 export function computeWasteScore(
   session: SessionRow,
   medianCost: number,
-  maxFileRereads: number,
+  sessionMaxRereads: number,
+  datasetMaxRereads: number,
 ): { score: number; cost_outlier: number; floundering: number; compaction: number; file_rereads: number } {
-  // Cost outlier: 0-40 points. At threshold = 20, at 10x threshold = 40
+  // Cost outlier: 0-40 points. At threshold = 20, saturates at 2x threshold = 40
   const outlierThreshold = Math.max(medianCost * 3, 0.50)
   let costOutlier = 0
   if (session.cost >= outlierThreshold) {
@@ -483,14 +484,16 @@ export function computeWasteScore(
     costOutlier = Math.min(40, Math.round(ratio * 20))
   }
 
-  // Floundering: 0-25 points. <5% output = 25, <10% = partial
+  // Floundering: 0-25 points. <5% output = 25, 5-10% = linear partial
   const totalFresh = session.input_tokens + session.output_tokens
-  const outRatio = totalFresh > 0 ? session.output_tokens / totalFresh : 0
   let floundering = 0
-  if (outRatio < 0.05 && session.cost > 0.10) {
-    floundering = 25
-  } else if (outRatio < 0.10 && session.cost > 0.10) {
-    floundering = Math.round((1 - outRatio / 0.10) * 25)
+  if (totalFresh > 0 && session.cost > 0.10) {
+    const outRatio = session.output_tokens / totalFresh
+    if (outRatio < 0.05) {
+      floundering = 25
+    } else if (outRatio < 0.10) {
+      floundering = Math.round((1 - (outRatio - 0.05) / 0.05) * 25)
+    }
   }
 
   // Compaction: 0-20 points. 3+ = 10, 5+ = 15, 8+ = 20
@@ -499,10 +502,10 @@ export function computeWasteScore(
   else if (session.compactions >= 5) compaction = 15
   else if (session.compactions >= 3) compaction = 10
 
-  // File rereads: 0-15 points, scaled by max in dataset
+  // File rereads: 0-15 points, normalized against dataset worst
   let fileRereads = 0
-  if (maxFileRereads > 0) {
-    fileRereads = Math.min(15, Math.round((maxFileRereads / 10) * 15))
+  if (sessionMaxRereads > 0 && datasetMaxRereads > 0) {
+    fileRereads = Math.min(15, Math.round((sessionMaxRereads / datasetMaxRereads) * 15))
   }
 
   const score = Math.min(100, costOutlier + floundering + compaction + fileRereads)
@@ -532,14 +535,15 @@ export function queryWasteScores(db: Database, filters: Filters): Map<string, { 
     GROUP BY session_id
   `, params)
   const fileReadMap = new Map(fileReadRows.map((r) => [r.session_id, r.max_reads]))
+  const datasetMaxRereads = fileReadRows.reduce((max, r) => Math.max(max, r.max_reads), 0)
 
   // All sessions
   const sessions = query<SessionRow>(db, `SELECT * FROM sessions ${clause}`, params)
   const result = new Map<string, { score: number; cost_outlier: number; floundering: number; compaction: number; file_rereads: number }>()
 
   for (const s of sessions) {
-    const maxReads = fileReadMap.get(s.id) ?? 0
-    const ws = computeWasteScore(s, median, maxReads)
+    const sessionReads = fileReadMap.get(s.id) ?? 0
+    const ws = computeWasteScore(s, median, sessionReads, datasetMaxRereads)
     if (ws.score > 0) result.set(s.id, ws)
   }
 
